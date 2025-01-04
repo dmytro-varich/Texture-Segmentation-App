@@ -7,78 +7,122 @@
 I would be incredibly grateful if a professional in this field could help identify and correct my mistakes, as well as provide recommendations for improvement.
 My code is available [here on GitHub](https://github.com/dmytro-varich/Texture-Segmentation-App/blob/main/segmentation_main.ipynb).
 
-I will implement a texture segmentation algorithm using the principle of representative patterns (PRP). The basic idea is to extract texture features based on local and global image patches. However, I am having difficulties with the segmentation quality, especially in the patch classification stage and subsequent segmentation.
 
-## **Approach Description:**
-### 1. Image Preprocessing  
-**Method:** `preprocess_image`  
-**Also Class:** `ImagePreprocessingMixin`  
+1. **Pokusy o zlepšenie algoritmu**  
+   Strávil som celé prázdniny snahou vylepšiť algoritmus. Odstránil som veľa zbytočných častí a urobil niekoľko vylepšení, no, žiaľ, presnosť segmentácie sa nezvýšila. Napriek tomu je navrhnutý prístup založený na **adaptabilite**. To znamená, že algoritmus sa automaticky prispôsobuje rôznym textúram a efektívne ich spracováva bez potreby manuálneho nastavovania parametrov pre každé konkrétne obrázok. Tento prístup umožňuje vyhnúť sa závislosti od pevne nastavených filtrov a robí algoritmus univerzálnym.  
 
-In the first step, I preprocess the image using various methods to preserve essential information required for the subsequent patch clustering stage. By experimenting with different parameters, I aim to enhance the representation of relevant features. The preprocessing methods include:  
-- **Gaussian Blur** (`_apply_gaussian_blur`): Smooths the image and reduces minor noise.  
-- **Wavelet Transform** (`_apply_wavelet_transform`): Highlights local frequency features.  
-- **Fourier Transform** (`_apply_fourier_transform`): Captures global frequency characteristics of the image.  
+2. **Hlavná myšlienka algoritmu**  
+   Hlavným cieľom algoritmu je extrahovať textúrne črty zo všetkých obrázkov v datasete. Tieto črty zahŕňajú:  
+   - **Entropiu** (na vyhodnotenie nehomogenity a náhodnosti textúry),  
+   - **Medián** (na určenie celkovej úrovne intenzity),  
+   - **Laplacián** (na zvýraznenie okrajov a drobných detailov),  
+   - **Wavelety** (na analýzu textúr v rôznych mierkach),  
+   - **Fourierovu transformáciu** (na analýzu frekvenčných charakteristík textúr).  
+
+3. **Rozdelenie obrázkov na patche**  
+   Po extrahovaní textúrnych čŕt sa každý obrázok rozdelí na malé časti (patche), aby sa získali lokálne charakteristiky textúry. Patche umožňujú zohľadniť lokálne aj globálne vlastnosti textúr.  
+
+4. **Klasifikácia a reprezentatívne vzory**  
+   Zo všetkých textúrnych patchov sa pomocou metódy \( K \)-means klasifikácie identifikujú kľúčové **reprezentatívne vzory** (PRP). Tieto vzory reprezentujú hlavné textúrne charakteristiky obrázkov a slúžia ako šablóny na porovnávanie. Prostredníctvom výpočtu podobnosti každého patchu s PRP sa určujú textúry, ku ktorým patria.  
+
+5. **Metóda `compute_texture_features`**  
+   Táto metóda vykonáva niekoľko hlavných krokov:  
+   - **Extrahovanie čŕt**: Najprv sa opakuje proces extrahovania textúrnych čŕt, rozdelenia na patche a ich transformácie na vektory, ktoré opisujú lokálne charakteristiky textúry.  
+   - **Porovnávanie patchov s centroidmi klasifikácie (PRP)**: Patche sa porovnávajú s PRP pomocou vzorca podobnosti založeného na Gaussovom jadre:  
+     \[
+     w(P_i, P_j) = \frac{1}{Z(i)} \exp\left(-\frac{\|P_i - P_j\|_2^2}{h^2 \cdot \sigma^2}\right)
+     \]  
+     **Vysvetlenie parametrov**:  
+     - \( \|P_i - P_j\|_2^2 \): Euklidovská vzdialenosť medzi patchom a vzorom, ktorá meria ich podobnosť.  
+     - \( h \): Parameter vyhladzovania, ktorý reguluje, ako rýchlo klesá váha so zvyšujúcou sa vzdialenosťou.  
+     - \( \sigma \): Mierka, ovplyvňujúca citlivosť na vzdialenosť.  
+     - \( Z(i) \): Normalizačná konštanta:  
+       \[
+       Z(i) = \sum_j \exp\left(-\frac{\|P_i - P_j\|_2^2}{h^2 \cdot \sigma^2}\right)
+       \]  
+       Táto konštanta zabezpečuje, že všetky váhy \( w(P_i, P_j) \) sa sčítajú na 1.  
+
+   **Význam vzorca**:  
+   - **Objektívnosť**: Gaussovo jadro vyhladzuje šum a zdôrazňuje najbližšie vzory.  
+   - **Adaptabilita**: Vzorec sa automaticky prispôsobuje rôznym textúram vďaka normalizácii.  
+   - **Kompaktnosť**: Namiesto uchovávania všetkých čŕt sa ukladá iba informácia o podobnosti s PRP, čo zjednodušuje ďalšie spracovanie.  
+
+6. **Zosilnenie čŕt a filtrovanie**  
+   Po výpočte podobnosti sa textúrne črty zosilnia pomocou kontrastných váh, aby sa zvýraznili najvýraznejšie vzory. Slabé vzory sa následne filtrujú pomocou priemernej pravdepodobnosti (\( \text{mean\_probabilities} \)), čo umožňuje sústrediť sa na najvýznamnejšie vzory.  
+
+7. **Priradenie klastrov**  
+   Každý patch sa priradí klastru, s ktorým má najvyššiu podobnosť:  
+   \[
+   \text{cluster\_id} = \arg\max_j w(P_i, P_j)
+   \]  
+   Výsledky segmentácie sa prevedú na textúrnu mapu, kde každý klaster má jedinečný identifikátor.  
+
+8. **Hlavné problémy**  
+   Algoritmus niekedy vytvára viac textúrnych segmentov, než je potrebné, kvôli nedostatočne prísnemu prahu. Tento problém riešime dodatočným filtrovaním slabých vzorov.  
+
+9. **Postprocesing**  
+   Po klasifikácii sa aplikuje postprocesing:  
+   - **Mediánový filter**: Vyhladzuje šum.  
+   - **Morfologické operácie**: Odstraňujú medzery medzi segmentmi a zlepšujú celkovú kvalitu.  
 
 ---
 
-### 2. Patch Extraction  
-**Method:** `extract_patches`  
+1. **Попытки улучшения алгоритма**  
+   Я потратил целые каникулы, чтобы попытаться улучшить алгоритм. Убрал много лишнего и внес небольшие изменения, но, к сожалению, точность сегментации не выросла. Тем не менее, предложенный подход рассчитан на **адаптивность**. Это означает, что алгоритм автоматически подстраивается под различные текстуры, эффективно обрабатывая их без необходимости ручного выбора параметров для каждого конкретного изображения. Такой подход позволяет избежать зависимости от жестко заданных фильтров и делает алгоритм универсальным.
 
-Next, I divide the image into fixed-size square patches (e.g., 16x16 pixels). These patches are extracted from each image in the dataset to analyze local texture features.  
+2. **Основная идея алгоритма**  
+   Основная идея заключается в извлечении текстурных признаков из всех изображений в датасете. Эти признаки включают:  
+   - **Энтропию** (для оценки неоднородности и случайности текстуры);  
+   - **Медиану** (для определения общего уровня интенсивности);  
+   - **Лапласиан** (для выделения границ и мелких деталей);  
+   - **Вейвлеты** (для анализа текстур на различных масштабах);  
+   - **Фурье-преобразование** (для анализа частотных характеристик текстур).  
 
-- **Overlapping or Non-Overlapping Patches**: The patch extraction process depends on the `patch_step` parameter, which determines the step size between patches.  
+3. **Разделение изображения на патчи**  
+   После извлечения текстурных признаков каждое изображение разбивается на небольшие патчи (локальные области), чтобы получить локальные особенности текстуры. Патчи позволяют учитывать как локальные, так и глобальные характеристики текстур.
+
+4. **Кластеризация и репрезентативные паттерны**  
+   Из набора всех текстурных патчей методом кластеризации \( K \)-средних выделяются ключевые **репрезентативные паттерны** (PRP). Эти паттерны представляют основные текстурные особенности изображения и используются как эталонные шаблоны для сравнения. Путем вычисления сходства каждого патча с PRP определяются текстуры, к которым он относится.  
+
+5. **Метод `compute_texture_features`**  
+   Этот метод выполняет несколько ключевых шагов:  
+   - **Получение признаков**: Сначала мы повторяем процесс извлечения текстурных признаков, разделения их на патчи и преобразования патчей в векторы, которые описывают локальные текстурные характеристики.  
+   - **Сравнение патчей с центроидами кластеров (PRP)**: Патчи сравниваются с PRP с помощью формулы сходства, основанной на Гауссовом ядре:  
+     \[
+     w(P_i, P_j) = \frac{1}{Z(i)} \exp\left(-\frac{\|P_i - P_j\|_2^2}{h^2 \cdot \sigma^2}\right)
+     \]  
+     **Расшифровка параметров**:  
+     - \( \|P_i - P_j\|_2^2 \): Евклидово расстояние между патчем и паттерном, определяющее степень их сходства.  
+     - \( h \): Параметр сглаживания, регулирующий, насколько быстро вес убывает при увеличении расстояния.  
+     - \( \sigma \): Масштаб, влияющий на чувствительность к расстоянию.  
+     - \( Z(i) \): Нормировочная константа:  
+       \[
+       Z(i) = \sum_j \exp\left(-\frac{\|P_i - P_j\|_2^2}{h^2 \cdot \sigma^2}\right)
+       \]  
+       Эта константа обеспечивает, что все веса \( w(P_i, P_j) \) суммируются до 1.  
+
+   **Значимость формулы**:  
+   - **Объективность**: Гауссово ядро сглаживает шум и выделяет наиболее близкие паттерны.  
+   - **Адаптивность**: Формула автоматически подстраивается под различные текстуры благодаря нормировке.  
+   - **Компактность**: Вместо хранения всех признаков используется только информация о сходстве с PRP.  
+
+6. **Усиление признаков и фильтрация**  
+   После вычисления сходства текстурные признаки усиливаются с использованием контрастных весов, чтобы выделить наиболее выраженные паттерны. Затем слабые паттерны отфильтровываются с использованием среднего значения вероятностей (\( \text{mean\_probabilities} \)). Это позволяет сосредоточиться на наиболее значимых паттернах.  
+
+7. **Назначение кластеров**  
+   Каждый патч присваивается кластеру, с которым у него наибольшее сходство:  
+   \[
+   \text{cluster\_id} = \arg\max_j w(P_i, P_j)
+   \]  
+   Результаты сегментации преобразуются в текстурную карту, где каждый кластер отображается уникальным идентификатором.  
+
+8. **Основные проблемы**  
+   Иногда алгоритм создает больше текстурных сегментов, чем нужно, из-за недостаточно строгого порога. Для борьбы с этим используется дополнительная фильтрация слабых паттернов.  
+
+9. **Постобработка**  
+   После классификации применяется постобработка:  
+   - **Медианный фильтр**: Сглаживает шумы.  
+   - **Морфологические операции**: Устраняют разрывы между сегментами.  
 
 ---
-
-### 3. PRP (Principle Representative Patterns)  
-**Method:** `cluster_patches`  
-
-All the extracted patches are combined into a single array and clustered using the **K-Means** algorithm. The resulting cluster centroids are interpreted as **PRPs** (Principle Representative Patterns).  
-
-- **The Core Idea of PRP**:  
-  PRPs provide a compact representation of textures by leveraging the **self-similarity** and **quasi-periodicity** properties of textures.  
-
----
-
-### 4. Texture Feature Calculation Based on PRP  
-**Method:** `compute_texture_features`  
-
-In this step, I compute texture features for each image:  
-- **Similarity Between Patches and PRPs**:  
-  The similarity of each patch to the PRPs is measured using a weighted Gaussian function, which evaluates how strongly a patch corresponds to each PRP.  
-- **Result**:  
-  The output is interpreted as a probability distribution or energy spectrum, representing the degree to which each patch belongs to a particular PRP.  
-
-Gaussian Formula of atricle:
-[Gaussian Formula](https://i.sstatic.net/ORhT4s18.png) 
-
----
-
-### 5. Segmentation Using the Mumford-Shah Algorithm  
-**Method:** `segmentation`  
-
-Based on the computed texture features, a **feature map** is generated for the entire image. This feature map is fed into the Mumford-Shah segmentation algorithm (I used an open-source implementation and integrated the corresponding class into my code).  
-
-- The algorithm divides the image into regions with homogeneous texture features.  
-
----
-
-### 6. Post-Processing  
-**Method:** `postprocess_segmentation`  
-
-For refining the segmentation boundaries, I use **CRF** (Conditional Random Fields) from the `pydensecrf` library.  
-- **Purpose of Post-Processing**:  
-  - Remove minor noise.  
-  - Refine the boundaries between segmented regions.  
----
-## Questions:
-
-1. What preprocessing methods are best suited for extracting meaningful texture features from an image?  
-
-2. Is my implementation of patch comparison in the `compute_texture_features` method correct?  
-
-3. What can be done to improve the algorithm? Would using a different clustering algorithm be more effective? If so, which one would you recommend?  
-
-Thanks for you answer!
-
 
